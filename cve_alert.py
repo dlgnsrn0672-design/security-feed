@@ -21,8 +21,8 @@ import links
 from common import CHAT_ID, TOKEN
 
 # CVE·KISA 알림은 전용 봇이 있으면 그쪽으로 (없으면 기본 봇)
-TOKEN = os.getenv("CVE_TELEGRAM_TOKEN") or TOKEN
-CHAT_ID = os.getenv("CVE_TELEGRAM_CHAT_ID") or CHAT_ID
+TOKEN = (os.getenv("CVE_TELEGRAM_TOKEN") or "").strip() or TOKEN
+CHAT_ID = (os.getenv("CVE_TELEGRAM_CHAT_ID") or "").strip() or CHAT_ID
 
 NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 KEV_URLS = (

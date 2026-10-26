@@ -18,8 +18,8 @@ import telegram
 import https_only
 from common import CHAT_ID, TOKEN
 
-TOKEN = os.getenv("CVE_TELEGRAM_TOKEN") or TOKEN
-CHAT_ID = os.getenv("CVE_TELEGRAM_CHAT_ID") or CHAT_ID
+TOKEN = (os.getenv("CVE_TELEGRAM_TOKEN") or "").strip() or TOKEN
+CHAT_ID = (os.getenv("CVE_TELEGRAM_CHAT_ID") or "").strip() or CHAT_ID
 
 STATE_FILE = Path(__file__).with_name("kisa_state.json")
 # 피드별로 주소를 앞에서부터 시도해서 처음 성공하는 곳을 사용 (RSS → 목록 페이지 순)

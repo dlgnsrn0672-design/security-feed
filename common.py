@@ -21,7 +21,8 @@ if os.getenv("FORCE_IPV4") == "1":
 
 
 def require_env(name):
-    value = os.getenv(name)
+    # 복사할 때 섞여 들어간 공백·줄바꿈 제거
+    value = (os.getenv(name) or "").strip()
     if not value:
         raise SystemExit(f".env에 {name} 값이 없습니다")
     return value
