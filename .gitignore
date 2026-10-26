@@ -1,0 +1,5 @@
+.env
+venv/
+state.json
+kisa_state.json
+__pycache__/
