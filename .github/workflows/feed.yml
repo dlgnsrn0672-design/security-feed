@@ -8,6 +8,10 @@ on:
         description: "텔레그램 전송 없이 로그로만 출력"
         type: boolean
         default: false
+      latest:
+        description: "KISA·보안뉴스 최신 글을 이 개수만큼 다시 전송 (0이면 새 글만)"
+        type: string
+        default: "0"
   schedule:
     # 외부 예약이 멈췄을 때를 대비한 예비 실행
     - cron: "*/10 * * * *"
@@ -58,7 +62,7 @@ jobs:
 
       - name: KISA 보안공지·보안뉴스
         if: always()
-        run: python kisa_watch.py ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: python kisa_watch.py --latest ${{ inputs.latest || '0' }} ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           FEED_FIRST_RUN_SHOW: "0"
 

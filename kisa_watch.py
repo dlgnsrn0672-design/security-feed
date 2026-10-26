@@ -96,6 +96,7 @@ def build_message(item, icon, label):
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="전송하지 않고 출력만 (상태 저장 안 함)")
+    parser.add_argument("--latest", type=int, default=0, help="이미 본 글이어도 피드별 최신 N건을 다시 전송")
     args = parser.parse_args()
 
     state = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
@@ -115,6 +116,8 @@ async def main():
             new = [it for it in items if it["link"] not in seen]
             # 첫 실행: 최근 몇 건만 보내서 연결 확인, 나머지는 기존 건으로 처리
             to_send = new[:FIRST_RUN_SHOW] if first else new
+            if args.latest:
+                to_send = items[:args.latest]
             for it in reversed(to_send):
                 text = build_message(it, icon, label)
                 if args.dry_run:
