@@ -36,8 +36,21 @@ FEEDS = {
         "https://www.dailysecu.com/rss/S1N1.xml",
     )),
 }
+FILTERED_FEEDS = {"dailysecu"}
+
+
+def is_security_news(title):
+    low = title.lower()
+    return any(k in low for k in SECURITY_KEYWORDS)
 # 처음 실행할 때 피드별로 최근 몇 건만 보냄 (0이면 기존 글은 기록만)
 FIRST_RUN_SHOW = int(os.getenv("FEED_FIRST_RUN_SHOW", "3"))
+# 일반 IT 기사가 섞인 피드는 제목에 이 단어가 있는 기사만 보냄
+SECURITY_KEYWORDS = (
+    "취약점", "해킹", "해커", "랜섬웨어", "유출", "침해", "악성코드", "악성 ", "피싱", "스미싱",
+    "제로데이", "보안 업데이트", "보안업데이트", "패치", "백도어", "디도스", "ddos", "apt",
+    "공격", "탈취", "사이버", "보안사고", "개인정보", "cve", "익스플로잇", "봇넷", "스파이웨어",
+    "다크웹", "정보유출", "인증정보", "계정", "경보",
+)
 MAX_SEEN = 1000
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -121,7 +134,11 @@ async def main():
             # 첫 실행: 최근 몇 건만 보내서 연결 확인, 나머지는 기존 건으로 처리
             to_send = new[:FIRST_RUN_SHOW] if first else new
             if args.latest:
-                to_send = items[:args.latest]
+                to_send = items[:args.latest * (5 if key in FILTERED_FEEDS else 1)]
+            if key in FILTERED_FEEDS:
+                to_send = [it for it in to_send if is_security_news(it["title"])]
+                if args.latest:
+                    to_send = to_send[:args.latest]
             for it in reversed(to_send):
                 text = build_message(it, icon, label)
                 if args.dry_run:
