@@ -1,4 +1,4 @@
-"""KISA(보호나라/KNVD) 보안공지·보안뉴스 → 텔레그램 알림 (CVE 전용 봇)
+"""KISA(보호나라/KNVD) 보안공지·보안뉴스·데일리시큐 → 텔레그램 알림 (CVE 전용 봇)
 
 실행:  python kisa_watch.py [--dry-run]
 """
@@ -31,6 +31,10 @@ FEEDS = {
         "https://www.boho.or.kr/kr/bbs/list.do?menuNo=205020&bbsId=B0000133",
     )),
     "boannews": ("📰", "보안뉴스", ("https://www.boannews.com/rss/S1N2.xml",)),
+    "dailysecu": ("🗞", "데일리시큐", (
+        "https://www.dailysecu.com/rss/allArticle.xml",
+        "https://www.dailysecu.com/rss/S1N1.xml",
+    )),
 }
 # 처음 실행할 때 피드별로 최근 몇 건만 보냄 (0이면 기존 글은 기록만)
 FIRST_RUN_SHOW = int(os.getenv("FEED_FIRST_RUN_SHOW", "3"))

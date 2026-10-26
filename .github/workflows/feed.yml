@@ -60,7 +60,7 @@ jobs:
           FIRST_RUN_LOOKBACK_HOURS: "1"
           KEV_FIRST_RUN_DAYS: "0"
 
-      - name: KISA 보안공지·보안뉴스
+      - name: KISA 보안공지·보안뉴스·데일리시큐
         if: always()
         run: python kisa_watch.py --latest ${{ inputs.latest || '0' }} ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
