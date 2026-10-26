@@ -39,8 +39,14 @@ FEEDS = {
 FILTERED_FEEDS = {"dailysecu"}
 
 
+# 보안 단어가 들어가도 실무 정보가 아닌 연재물은 제외
+EXCLUDE_KEYWORDS = ("연재소설",)
+
+
 def is_security_news(title):
     low = title.lower()
+    if any(k in low for k in EXCLUDE_KEYWORDS):
+        return False
     return any(k in low for k in SECURITY_KEYWORDS)
 # 처음 실행할 때 피드별로 최근 몇 건만 보냄 (0이면 기존 글은 기록만)
 FIRST_RUN_SHOW = int(os.getenv("FEED_FIRST_RUN_SHOW", "3"))
