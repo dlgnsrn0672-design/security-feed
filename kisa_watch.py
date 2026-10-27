@@ -73,7 +73,7 @@ JOSA = ("으로", "에서", "에게", "까지", "부터", "에는", "했다", "�
         "은", "는", "이", "가", "을", "를", "에", "의", "로", "와", "과", "도", "만")
 ALIASES = {"ms": "마이크로소프트", "microsoft": "마이크로소프트", "google": "구글", "apple": "애플",
            "cisco": "시스코", "fortinet": "포티넷", "ivanti": "이반티", "chrome": "크롬", "oracle": "오라클",
-           "samsung": "삼성", "skt": "sk텔레콤", "kisa": "인터넷진흥원", "vmware": "브이엠웨어"}
+           "samsung": "삼성", "노드투셸": "node2shell", "skt": "sk텔레콤", "kisa": "인터넷진흥원", "vmware": "브이엠웨어"}
 
 
 def title_tokens(title):
@@ -95,8 +95,10 @@ def title_tokens(title):
     return out
 
 
-def same_story(a, b):
-    """두 기사 제목이 같은 사건인지 (CVE 번호가 같거나, 고유 단어가 2개 이상·절반 이상 겹침)"""
+def same_story(a, b, df=None):
+    """두 기사 제목이 같은 사건인지
+    CVE 번호가 같거나, 고유 단어가 2개 이상·절반 이상 겹치거나, 3개 이상 겹치거나,
+    최근 제목들 중 이 두 기사에만 나오는 이름(회사·제품명 등)을 포함해 2개 이상 겹치면 같은 사건"""
     cve = re.compile(r"cve-\d{4}-\d+")
     if set(cve.findall(a.lower())) & set(cve.findall(b.lower())):
         return True
@@ -104,7 +106,21 @@ def same_story(a, b):
     if not ta or not tb:
         return False
     hit = sum(1 for x in ta if any(x == y or (x.startswith(y) or y.startswith(x)) for y in tb))
-    return hit >= 2 and hit / min(len(ta), len(tb)) >= 0.5
+    ratio = hit / min(len(ta), len(tb))
+    if hit >= 2 and ratio >= 0.5 or hit >= 3 and ratio >= 0.4:
+        return True
+    rare = df is not None and any(len(x) >= 3 and not x.isdigit() and df.get(x, 0) <= 2 for x in ta & tb)
+    return hit >= 2 and rare
+
+
+def token_df(titles):
+    """단어별로 몇 개 제목에 나오는지"""
+    df = {}
+    for t in titles:
+        for w in title_tokens(t):
+            df[w] = df.get(w, 0) + 1
+    return df
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -196,8 +212,9 @@ async def main():
                     to_send = to_send[:args.latest]
             if key in NEWS_FEEDS:
                 kept = []
+                df = token_df([r["title"] for r in recent] + [it["title"] for it in items])
                 for it in reversed(to_send):
-                    dup = next((r for r in recent if r["feed"] != key and same_story(it["title"], r["title"])), None)
+                    dup = next((r for r in recent if r["feed"] != key and same_story(it["title"], r["title"], df)), None)
                     if dup:
                         log.info("중복 기사 건너뜀: %s ← %s", it["title"], dup["title"])
                         continue
