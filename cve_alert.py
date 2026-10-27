@@ -167,6 +167,33 @@ async def translate_ko(client, text):
 RANSOMWARE_KO = {"Known": "사용 확인됨", "Unknown": "확인되지 않음"}
 
 
+EPSS_URL = "https://api.first.org/data/v1/epss"
+
+
+async def fetch_epss(client, cve_id):
+    """(악용 확률, 백분위) — 앞으로 30일 안에 실제 악용될 확률 (FIRST EPSS). 없거나 실패면 None"""
+    try:
+        resp = await client.get(EPSS_URL, params={"cve": cve_id})
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+        if data:
+            return float(data[0]["epss"]), float(data[0]["percentile"])
+    except Exception as e:
+        log.warning("EPSS %s 조회 실패: %s", cve_id, e)
+    return None
+
+
+def epss_line(epss):
+    if not epss:
+        return "EPSS: 아직 산정 전 (신규 취약점은 하루 정도 걸림)"
+    prob, pct = epss
+    icon = "🔥" if prob >= 0.5 else "🔴" if prob >= 0.1 else "🟠" if prob >= 0.01 else "🟢"
+    level = ("매우 높음" if prob >= 0.5 else "높음" if prob >= 0.1 else "보통" if prob >= 0.01 else "낮음")
+    shown = f"{prob * 100:.2f}" if prob < 0.01 else f"{prob * 100:.1f}"
+    return (f"{icon} EPSS 악용 확률: <b>{shown}%</b> ({level}, 상위 {max(0.1, (1 - pct) * 100):.1f}%)"
+            " — 30일 내 실제 공격 예측")
+
+
 def kev_lines(kev):
     """판단에 필요한 실제 악용 정보"""
     lines = [
@@ -195,7 +222,7 @@ def kev_refs(kev):
     return urls
 
 
-def build_message(cve, score, version, vector, description_ko, kev=None):
+def build_message(cve, score, version, vector, description_ko, kev=None, epss=None):
     cve_id = cve["id"]
     published = cve.get("published", "")[:10]
     refs = [r["url"] for r in cve.get("references", [])][:3]
@@ -211,13 +238,15 @@ def build_message(cve, score, version, vector, description_ko, kev=None):
         f"점수: <b>{score}</b> (CVSS v{version})",
         f"벡터: <code>{html.escape(vector)}</code>",
         f"공개일: {published}",
+        epss_line(epss),
     ]
     if cwes:
         lines.append(f"유형: {', '.join(cwes)}")
     if kev:
         lines += [""] + kev_lines(kev)
     lines += ["", "<b>설명</b>", html.escape(description_ko), ""]
-    sources = [f'<a href="https://nvd.nist.gov/vuln/detail/{cve_id}">NVD</a>']
+    sources = [f'<a href="https://nvd.nist.gov/vuln/detail/{cve_id}">NVD</a>',
+               '<a href="https://www.first.org/epss/data_stats">EPSS</a>']
     if kev:
         sources.append(links.kev(cve_id))
     lines.append(links.line(*sources))
@@ -226,7 +255,7 @@ def build_message(cve, score, version, vector, description_ko, kev=None):
     return "\n".join(lines)
 
 
-def build_kev_message(kev, cve, description_ko, already_alerted):
+def build_kev_message(kev, cve, description_ko, already_alerted, epss=None):
     cve_id = kev["cveID"]
     title = "🔴 <b>실제 악용 취약점 신규 등록 (CISA KEV)</b>"
     lines = [title, ""]
@@ -244,6 +273,7 @@ def build_kev_message(kev, cve, description_ko, already_alerted):
         lines.append(f"벡터: <code>{html.escape(vector)}</code>")
     else:
         lines.append("점수: NVD 미산정 (점수가 없어도 실제 악용 중이므로 우선 대응)")
+    lines.append(epss_line(epss))
     if kev.get("cwes"):
         lines.append(f"유형: {', '.join(kev['cwes'])}")
     lines += [""] + kev_lines(kev)
@@ -290,8 +320,9 @@ async def check_once(bot, client, dry_run):
             continue
         score, version, vector = scored
         kev_entry = (kev or {}).get(cve["id"])
-        description_ko = await translate_ko(client, english_description(cve))
-        await send(bot, build_message(cve, score, version, vector, description_ko, kev_entry), dry_run)
+        description_ko, epss = await asyncio.gather(translate_ko(client, english_description(cve)),
+                                                    fetch_epss(client, cve["id"]))
+        await send(bot, build_message(cve, score, version, vector, description_ko, kev_entry, epss), dry_run)
         seen.append(cve["id"])
         if kev_entry:
             # 악용 정보까지 이미 담았으니 KEV 알림은 따로 안 보냄
@@ -303,8 +334,9 @@ async def check_once(bot, client, dry_run):
         if cve_id in kev_seen:
             continue
         cve = await fetch_cve(client, cve_id)
-        description_ko = await translate_ko(client, entry.get("shortDescription", ""))
-        await send(bot, build_kev_message(entry, cve, description_ko, cve_id in seen), dry_run)
+        description_ko, epss = await asyncio.gather(translate_ko(client, entry.get("shortDescription", "")),
+                                                    fetch_epss(client, cve_id))
+        await send(bot, build_kev_message(entry, cve, description_ko, cve_id in seen, epss), dry_run)
         kev_seen.add(cve_id)
         kev_sent += 1
 
