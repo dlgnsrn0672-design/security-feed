@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urljoin
@@ -57,6 +58,53 @@ SECURITY_KEYWORDS = (
     "다크웹", "정보유출", "인증정보", "계정", "경보",
 )
 MAX_SEEN = 1000
+
+# 보안뉴스·데일리시큐가 같은 사건을 보도하면 먼저 보낸 기사만 알림
+NEWS_FEEDS = {"boannews", "dailysecu"}
+DUP_WINDOW = 3 * 86400
+# 기사마다 흔히 들어가는 단어는 비교에서 빼고 회사·제품·사건 이름만 비교
+STOPWORDS = set("""
+보안 취약점 제로데이 패치 긴급 업데이트 정기 발표 유출 해킹 해커 공격 피해 정보 개인정보 우려 확산 사고 실제 악용 포함
+주장 대상 조직 국내 해외 기업 업체 사이버 위협 증가 전망 기반 관련 발견 경고 주의 대응 조치 위해 통해 대한 이번 최근
+신규 새로운 사용자 고객 랜섬웨어 악성코드 피싱 스미싱 계정 탈취 침해 공개 확인 분석 보고서 결과 발생 가능 가능성
+위한 따른 하는 있는 없는 the an of to in for and on with new update security vulnerability vulnerabilities attack attacks
+""".split())
+JOSA = ("으로", "에서", "에게", "까지", "부터", "에는", "했다", "한다", "된다", "됐다", "돼",
+        "은", "는", "이", "가", "을", "를", "에", "의", "로", "와", "과", "도", "만")
+ALIASES = {"ms": "마이크로소프트", "microsoft": "마이크로소프트", "google": "구글", "apple": "애플",
+           "cisco": "시스코", "fortinet": "포티넷", "ivanti": "이반티", "chrome": "크롬", "oracle": "오라클",
+           "samsung": "삼성", "skt": "sk텔레콤", "kisa": "인터넷진흥원", "vmware": "브이엠웨어"}
+
+
+def title_tokens(title):
+    text = re.sub(r"\[[^\]]*\]|【[^】]*】", " ", title.lower())
+    out = set()
+    for w in re.findall(r"[0-9a-z]+(?:[-.][0-9a-z]+)*|[가-힣]+", text):
+        if w in STOPWORDS:
+            continue
+        if re.match(r"[가-힣]", w):
+            for j in JOSA:
+                if len(w) > len(j) + 1 and w.endswith(j):
+                    w = w[:-len(j)]
+                    break
+        if w.isdigit() and len(w) < 3:  # '10월' 같은 짧은 숫자는 구분력이 없음
+            continue
+        w = ALIASES.get(w, w)
+        if len(w) >= 2 and w not in STOPWORDS:
+            out.add(w)
+    return out
+
+
+def same_story(a, b):
+    """두 기사 제목이 같은 사건인지 (CVE 번호가 같거나, 고유 단어가 2개 이상·절반 이상 겹침)"""
+    cve = re.compile(r"cve-\d{4}-\d+")
+    if set(cve.findall(a.lower())) & set(cve.findall(b.lower())):
+        return True
+    ta, tb = title_tokens(a), title_tokens(b)
+    if not ta or not tb:
+        return False
+    hit = sum(1 for x in ta if any(x == y or (x.startswith(y) or y.startswith(x)) for y in tb))
+    return hit >= 2 and hit / min(len(ta), len(tb)) >= 0.5
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -125,6 +173,8 @@ async def main():
     if "seen" in state:  # 예전 형식(KISA만) → 피드별 형식
         state = {"kisa": state["seen"]}
     bot = None if args.dry_run else Bot(TOKEN)
+    now = time.time()
+    recent = [r for r in state.get("recent_news", []) if now - r["ts"] < DUP_WINDOW]
 
     headers = {"User-Agent": "Mozilla/5.0 (kisa-watch)"}
     async with https_only.client(timeout=30, headers=headers, follow_redirects=True) as client:
@@ -144,6 +194,16 @@ async def main():
                 to_send = [it for it in to_send if is_security_news(it["title"])]
                 if args.latest:
                     to_send = to_send[:args.latest]
+            if key in NEWS_FEEDS:
+                kept = []
+                for it in reversed(to_send):
+                    dup = next((r for r in recent if r["feed"] != key and same_story(it["title"], r["title"])), None)
+                    if dup:
+                        log.info("중복 기사 건너뜀: %s ← %s", it["title"], dup["title"])
+                        continue
+                    kept.append(it)
+                    recent.append({"feed": key, "title": it["title"], "ts": now})
+                to_send = kept[::-1]
             for it in reversed(to_send):
                 text = build_message(it, icon, label)
                 if args.dry_run:
@@ -154,6 +214,7 @@ async def main():
                     await asyncio.sleep(1)
             log.info("%s 새 글 %d건, 알림 %d건", label, len(new), len(to_send))
             state[key] = (seen + [it["link"] for it in new])[-MAX_SEEN:]
+    state["recent_news"] = recent[-300:]
     if not args.dry_run:
         STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
 
