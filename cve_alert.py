@@ -14,11 +14,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import telegram
 
 import https_only
 import links
-from common import CHAT_ID, TOKEN
+from common import CHAT_ID, TOKEN, Bot
 
 # CVE·KISA 알림은 전용 봇이 있으면 그쪽으로 (없으면 기본 봇)
 TOKEN = (os.getenv("CVE_TELEGRAM_TOKEN") or "").strip() or TOKEN
@@ -321,7 +320,7 @@ async def main():
     parser.add_argument("--dry-run", action="store_true", help="전송하지 않고 출력만 (상태 저장 안 함)")
     args = parser.parse_args()
 
-    bot = telegram.Bot(TOKEN)
+    bot = Bot(TOKEN)
     async with https_only.client(timeout=60) as client:
         while True:
             try:

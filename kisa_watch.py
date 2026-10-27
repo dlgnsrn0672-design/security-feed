@@ -13,10 +13,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urljoin
 
-import telegram
 
 import https_only
-from common import CHAT_ID, TOKEN
+from common import CHAT_ID, TOKEN, Bot
 
 TOKEN = (os.getenv("CVE_TELEGRAM_TOKEN") or "").strip() or TOKEN
 CHAT_ID = (os.getenv("CVE_TELEGRAM_CHAT_ID") or "").strip() or CHAT_ID
@@ -125,7 +124,7 @@ async def main():
     state = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
     if "seen" in state:  # 예전 형식(KISA만) → 피드별 형식
         state = {"kisa": state["seen"]}
-    bot = None if args.dry_run else telegram.Bot(TOKEN)
+    bot = None if args.dry_run else Bot(TOKEN)
 
     headers = {"User-Agent": "Mozilla/5.0 (kisa-watch)"}
     async with https_only.client(timeout=30, headers=headers, follow_redirects=True) as client:
