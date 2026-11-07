@@ -179,6 +179,20 @@ def build_message(item, icon, label):
     return "\n".join(lines)
 
 
+def build_digest(outbox, per_msg=15):
+    """여러 출처의 새 글을 모은 메시지 (15건씩)"""
+    pages = (len(outbox) + per_msg - 1) // per_msg
+    msgs = []
+    for i in range(0, len(outbox), per_msg):
+        lines = [f"📰 <b>새 보안 소식 {len(outbox)}건</b>" + (f" ({i // per_msg + 1}/{pages})" if pages > 1 else ""), ""]
+        for it, icon, label in outbox[i:i + per_msg]:
+            lines.append(f'{icon} [{label}] <a href="{html.escape(it["link"])}">{html.escape(it["title"])}</a>')
+        if any(re.search(r"업데이트|패치|취약점", it["title"]) for it, _, _ in outbox[i:i + per_msg]):
+            lines += ["", "→ 업데이트·패치 공지는 사내 사용 제품이면 패치 일정 확인"]
+        msgs.append("\n".join(lines))
+    return msgs
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="전송하지 않고 출력만 (상태 저장 안 함)")
@@ -192,6 +206,7 @@ async def main():
     now = time.time()
     recent = [r for r in state.get("recent_news", []) if now - r["ts"] < DUP_WINDOW]
 
+    outbox = []  # (글, 아이콘, 출처)
     headers = {"User-Agent": "Mozilla/5.0 (kisa-watch)"}
     async with https_only.client(timeout=30, headers=headers, follow_redirects=True) as client:
         for key, (icon, label, sources) in FEEDS.items():
@@ -221,16 +236,18 @@ async def main():
                     kept.append(it)
                     recent.append({"feed": key, "title": it["title"], "ts": now})
                 to_send = kept[::-1]
-            for it in reversed(to_send):
-                text = build_message(it, icon, label)
-                if args.dry_run:
-                    print(text, "\n" + "-" * 60)
-                else:
-                    await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="HTML",
-                                           disable_web_page_preview=True)
-                    await asyncio.sleep(1)
+            outbox += [(it, icon, label) for it in reversed(to_send)]
             log.info("%s 새 글 %d건, 알림 %d건", label, len(new), len(to_send))
             state[key] = (seen + [it["link"] for it in new])[-MAX_SEEN:]
+    # 이번 실행에 새 글이 여러 개면 한 메시지로 모아서 보냄
+    messages = [build_message(*outbox[0])] if len(outbox) == 1 else build_digest(outbox)
+    for text in messages:
+        if args.dry_run:
+            print(text, "\n" + "-" * 60)
+        else:
+            await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="HTML",
+                                   disable_web_page_preview=True)
+            await asyncio.sleep(3)
     state["recent_news"] = recent[-300:]
     if not args.dry_run:
         STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))

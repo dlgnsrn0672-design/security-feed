@@ -285,8 +285,6 @@ def build_kev_message(kev, cve, description_ko, already_alerted, epss=None):
     return "\n".join(lines)
 
 
-# 한 실행에서 같은 제품의 Critical CVE가 이만큼 이상이면 한 메시지로 묶어서 보냄
-GROUP_MIN = 4
 STOP_WORDS = {"could", "is", "are", "contains", "through", "versions", "version", "allows", "and", "before", "prior"}
 
 
@@ -305,24 +303,32 @@ def impact(cve):
     """설명에서 영향 부분만 (버전 나열 뒤 'could allow ...' 등)"""
     desc = english_description(cve)
     m = re.search(r"\b(could allow|allows?|is vulnerable|are vulnerable|contains|uses|could)\b", desc)
-    return (desc[m.start():] if m else desc)[:60].strip()
+    return (desc[m.start():] if m else desc)[:160].strip()
 
 
-def build_group_messages(product, items, per_msg=20):
-    """items: [(cve, score)] → 20건씩 나눈 묶음 메시지"""
-    items = sorted(items, key=lambda x: -x[1])
-    pages = (len(items) + per_msg - 1) // per_msg
+def epss_badge(epss):
+    if not epss:
+        return "EPSS 산정 전"
+    prob = epss[0]
+    icon = "🔥" if prob >= 0.5 else "🔴" if prob >= 0.1 else "🟠" if prob >= 0.01 else "🟢"
+    return f"{icon} EPSS {prob * 100:.1f}%"
+
+
+def build_digest(entries, kev_ids=(), per_msg=15):
+    """entries: [(cve, score, 한국어 요약, epss)] → 이번 실행 새 취약점을 모은 메시지 (15건씩)"""
+    entries = sorted(entries, key=lambda e: (product_key(e[0]) or "~", -e[1]))
+    pages = (len(entries) + per_msg - 1) // per_msg
     msgs = []
-    for i in range(0, len(items), per_msg):
-        part = items[i:i + per_msg]
-        lines = [f"🚨 <b>{html.escape(product)} — Critical 취약점 {len(items)}건 동시 공개</b>"
+    for i in range(0, len(entries), per_msg):
+        lines = [f"🚨 <b>새 Critical 취약점 {len(entries)}건</b> (CVSS {MIN_SCORE} 이상)"
                  + (f" ({i // per_msg + 1}/{pages})" if pages > 1 else ""), ""]
-        for cve, score in part:
-            lines.append(f'• <a href="https://nvd.nist.gov/vuln/detail/{cve["id"]}">{cve["id"]}</a> '
-                         f"({score}) {html.escape(impact(cve))}")
-        lines += ["", "→ 사내에서 이 제품을 쓰면 벤더 보안 공지 확인 후 일괄 패치",
-                  f"🔎 직접 확인: <a href=\"https://nvd.nist.gov/vuln/search#/nvd/home?keyword="
-                  f"{html.escape(product.replace(' ', '%20'))}&resultType=records\">NVD에서 제품 검색</a>"]
+        for cve, score, summary_ko, epss in entries[i:i + per_msg]:
+            product = product_key(cve) or ""
+            flag = "⚠️<b>실제 악용</b> " if cve["id"] in kev_ids else ""
+            lines.append(f'{flag}<b>{score}</b> <a href="https://nvd.nist.gov/vuln/detail/{cve["id"]}">{cve["id"]}</a> '
+                         f"{html.escape(product)} · {epss_badge(epss)}")
+            lines.append(f"   └ {html.escape(summary_ko[:90])}")
+        lines += ["", "→ 사내 사용 제품이 있으면 CVE를 눌러 상세·패치 정보 확인"]
         msgs.append("\n".join(lines))
     return msgs
 
@@ -377,27 +383,27 @@ async def send_new(bot, client, cves, kev, seen, kev_seen, now, dry_run):
         if scored is not None and scored[0] >= MIN_SCORE:
             todo.append((cve, scored))
 
-    # 같은 제품이 한꺼번에 많이 나오면 묶음 1건으로 (KEV에 오른 건 따로 자세히)
-    groups = {}
-    for cve, scored in todo:
-        key = product_key(cve)
-        if key and cve["id"] not in (kev or {}):
-            groups.setdefault(key, []).append((cve, scored[0]))
-    grouped = set()
-    for product, items in groups.items():
-        if len(items) < GROUP_MIN:
-            continue
-        for message in build_group_messages(product, items):
+    # 한 번 실행에서 새 건이 여러 개면 한 메시지로 모아서 보냄 (1건이면 아래에서 자세히)
+    if len(todo) >= 2:
+        sem = asyncio.Semaphore(5)
+
+        async def prepare(cve, scored):
+            async with sem:
+                summary_ko, epss = await asyncio.gather(translate_ko(client, impact(cve)),
+                                                        fetch_epss(client, cve["id"]))
+            return cve, scored[0], summary_ko, epss
+
+        entries = await asyncio.gather(*(prepare(cve, scored) for cve, scored in todo))
+        for message in build_digest(entries, kev or {}):
             await send(bot, message, dry_run)
-        for cve, _ in items:
+        # 실제 악용(KEV) 건은 아래 KEV 알림으로 따로 자세히 한 번 더 감
+        for cve, _ in todo:
             seen.append(cve["id"])
-            grouped.add(cve["id"])
-        log.info("CVSS 묶음 알림: %s %d건 (%s)", product, len(items), ", ".join(c["id"] for c, _ in items))
-        sent += len(items)
+        log.info("CVSS 묶음 알림 %d건: %s", len(todo), ", ".join(c["id"] for c, _ in todo))
+        sent += len(todo)
+        todo = []
 
     for cve, scored in todo:
-        if cve["id"] in grouped:
-            continue
         score, version, vector = scored
         kev_entry = (kev or {}).get(cve["id"])
         description_ko, epss = await asyncio.gather(translate_ko(client, english_description(cve)),
