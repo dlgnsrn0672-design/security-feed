@@ -12,6 +12,10 @@ on:
         description: "KISA·보안뉴스 최신 글을 이 개수만큼 다시 전송 (0이면 새 글만)"
         type: string
         default: "0"
+      audit:
+        description: "이 단어가 들어간 최근 14일 Critical CVE와 알림 여부만 확인 (예: IBM, 전송 없음)"
+        type: string
+        default: ""
   schedule:
     # 외부 예약이 멈췄을 때를 대비한 예비 실행
     - cron: "*/10 * * * *"
@@ -50,10 +54,13 @@ jobs:
           restore-keys: kisa-state-
 
       - name: CVE·KEV
-        run: python cve_alert.py --once ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          if [ -n "$AUDIT" ]; then python cve_alert.py --audit "$AUDIT"; exit 0; fi
+          python cve_alert.py --once ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
           DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
+          AUDIT: ${{ inputs.audit }}
           MIN_CVSS_SCORE: "9.0"
           MAX_CVE_AGE_DAYS: "30"
           # 기존 비공개 저장소에서 이미 보낸 알림이 다시 오지 않도록 첫 실행은 최근분만
@@ -61,18 +68,18 @@ jobs:
           KEV_FIRST_RUN_DAYS: "0"
 
       - name: KISA 보안공지·보안뉴스·데일리시큐
-        if: always()
+        if: always() && !inputs.audit
         run: python kisa_watch.py --latest ${{ inputs.latest || '0' }} ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           FEED_FIRST_RUN_SHOW: "0"
 
       - uses: actions/cache/save@v4
-        if: always() && !inputs.dry_run
+        if: always() && !inputs.dry_run && !inputs.audit
         with:
           path: state.json
           key: cve-state-${{ github.run_id }}
       - uses: actions/cache/save@v4
-        if: always() && !inputs.dry_run
+        if: always() && !inputs.dry_run && !inputs.audit
         with:
           path: kisa_state.json
           key: kisa-state-${{ github.run_id }}

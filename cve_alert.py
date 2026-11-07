@@ -323,6 +323,7 @@ async def check_once(bot, client, dry_run):
         description_ko, epss = await asyncio.gather(translate_ko(client, english_description(cve)),
                                                     fetch_epss(client, cve["id"]))
         await send(bot, build_message(cve, score, version, vector, description_ko, kev_entry, epss), dry_run)
+        log.info("CVSS 알림: %s (%.1f) %s", cve["id"], score, english_description(cve)[:80])
         seen.append(cve["id"])
         if kev_entry:
             # 악용 정보까지 이미 담았으니 KEV 알림은 따로 안 보냄
@@ -337,6 +338,7 @@ async def check_once(bot, client, dry_run):
         description_ko, epss = await asyncio.gather(translate_ko(client, entry.get("shortDescription", "")),
                                                     fetch_epss(client, cve_id))
         await send(bot, build_kev_message(entry, cve, description_ko, cve_id in seen, epss), dry_run)
+        log.info("KEV 알림: %s %s", cve_id, entry.get("product", ""))
         kev_seen.add(cve_id)
         kev_sent += 1
 
@@ -346,12 +348,32 @@ async def check_once(bot, client, dry_run):
         save_state(now, seen, kev_seen if kev is not None or kev_seen else None)
 
 
+async def audit(client, keyword, days):
+    """최근 Critical CVE 중 keyword가 들어간 것과 이미 알림 보냈는지 출력 (전송·저장 안 함)"""
+    _, seen, _ = load_state()
+    now = datetime.now(timezone.utc)
+    cves = await fetch_critical(client, now - timedelta(days=days), now)
+    hits = sorted((c for c in cves if keyword.lower() in english_description(c).lower()), key=lambda c: c["published"])
+    log.info("최근 %d일 Critical %d건 중 '%s' %d건 (CVE 번호 기준 중복 없음)", days, len(cves), keyword, len(hits))
+    for c in hits:
+        scored = best_score(c)
+        log.info("%s | 공개 %s | 수정 %s | %s | %s | %s", c["id"], c["published"][:10], c["lastModified"][:10],
+                 scored[0] if scored else "-", "알림 보냄" if c["id"] in seen else "안 보냄",
+                 english_description(c)[:90])
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="한 번만 확인하고 종료")
     parser.add_argument("--dry-run", action="store_true", help="전송하지 않고 출력만 (상태 저장 안 함)")
+    parser.add_argument("--audit", default="", help="이 단어가 들어간 최근 Critical CVE와 알림 여부만 출력")
+    parser.add_argument("--audit-days", type=int, default=14)
     args = parser.parse_args()
 
+    if args.audit:
+        async with https_only.client(timeout=60) as client:
+            await audit(client, args.audit, args.audit_days)
+        return
     bot = Bot(TOKEN)
     async with https_only.client(timeout=60) as client:
         while True:
