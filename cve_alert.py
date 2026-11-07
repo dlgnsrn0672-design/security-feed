@@ -11,6 +11,7 @@ import html
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -284,6 +285,48 @@ def build_kev_message(kev, cve, description_ko, already_alerted, epss=None):
     return "\n".join(lines)
 
 
+# 한 실행에서 같은 제품의 Critical CVE가 이만큼 이상이면 한 메시지로 묶어서 보냄
+GROUP_MIN = 4
+STOP_WORDS = {"could", "is", "are", "contains", "through", "versions", "version", "allows", "and", "before", "prior"}
+
+
+def product_key(cve):
+    """설명 앞부분의 제품명 (예: 'IBM API Connect 10.0.8 through ...' → 'IBM API Connect')"""
+    words = []
+    for w in english_description(cve).split():
+        w = w.strip(",;:()-–")
+        if not w or re.search(r"\d", w) or w.lower() in STOP_WORDS or len(words) == 5:
+            break
+        words.append(w)
+    return " ".join(words) if len(words) >= 2 else None
+
+
+def impact(cve):
+    """설명에서 영향 부분만 (버전 나열 뒤 'could allow ...' 등)"""
+    desc = english_description(cve)
+    m = re.search(r"\b(could allow|allows?|is vulnerable|are vulnerable|contains|uses|could)\b", desc)
+    return (desc[m.start():] if m else desc)[:60].strip()
+
+
+def build_group_messages(product, items, per_msg=20):
+    """items: [(cve, score)] → 20건씩 나눈 묶음 메시지"""
+    items = sorted(items, key=lambda x: -x[1])
+    pages = (len(items) + per_msg - 1) // per_msg
+    msgs = []
+    for i in range(0, len(items), per_msg):
+        part = items[i:i + per_msg]
+        lines = [f"🚨 <b>{html.escape(product)} — Critical 취약점 {len(items)}건 동시 공개</b>"
+                 + (f" ({i // per_msg + 1}/{pages})" if pages > 1 else ""), ""]
+        for cve, score in part:
+            lines.append(f'• <a href="https://nvd.nist.gov/vuln/detail/{cve["id"]}">{cve["id"]}</a> '
+                         f"({score}) {html.escape(impact(cve))}")
+        lines += ["", "→ 사내에서 이 제품을 쓰면 벤더 보안 공지 확인 후 일괄 패치",
+                  f"🔎 직접 확인: <a href=\"https://nvd.nist.gov/vuln/search#/nvd/home?keyword="
+                  f"{html.escape(product.replace(' ', '%20'))}&resultType=records\">NVD에서 제품 검색</a>"]
+        msgs.append("\n".join(lines))
+    return msgs
+
+
 async def send(bot, message, dry_run):
     if dry_run:
         print(message, "\n" + "-" * 60)
@@ -292,7 +335,8 @@ async def send(bot, message, dry_run):
         chat_id=CHAT_ID, text=message,
         parse_mode="HTML", disable_web_page_preview=True,
     )
-    await asyncio.sleep(1)
+    # 단체방은 분당 20건 정도로 전송이 제한되어 간격을 둠
+    await asyncio.sleep(3)
 
 
 async def check_once(bot, client, dry_run):
@@ -311,12 +355,48 @@ async def check_once(bot, client, dry_run):
     cves = await fetch_critical(client, start, now)
     log.info("%s ~ %s: Critical %d건 조회", start.strftime("%m-%d %H:%M"), now.strftime("%m-%d %H:%M"), len(cves))
 
+    sent, kev_sent, done = 0, 0, False
+    try:
+        sent, kev_sent = await send_new(bot, client, cves, kev, seen, kev_seen, now, dry_run)
+        done = True
+    finally:
+        if not dry_run:
+            # 중간에 실패해도 이미 보낸 건은 기록해서 다음 실행에 다시 보내지 않음
+            # (조회 기준 시각은 끝까지 성공했을 때만 앞으로)
+            save_state(now if done else last_check, seen, kev_seen if kev is not None or kev_seen else None)
+    log.info("CVSS 알림 %d건, KEV 알림 %d건%s", sent, kev_sent, " (dry-run)" if dry_run else "")
+
+
+async def send_new(bot, client, cves, kev, seen, kev_seen, now, dry_run):
     sent = 0
+    todo = []
     for cve in cves:
         if cve["id"] in seen or not is_recent(cve, now):
             continue
         scored = best_score(cve)
-        if scored is None or scored[0] < MIN_SCORE:
+        if scored is not None and scored[0] >= MIN_SCORE:
+            todo.append((cve, scored))
+
+    # 같은 제품이 한꺼번에 많이 나오면 묶음 1건으로 (KEV에 오른 건 따로 자세히)
+    groups = {}
+    for cve, scored in todo:
+        key = product_key(cve)
+        if key and cve["id"] not in (kev or {}):
+            groups.setdefault(key, []).append((cve, scored[0]))
+    grouped = set()
+    for product, items in groups.items():
+        if len(items) < GROUP_MIN:
+            continue
+        for message in build_group_messages(product, items):
+            await send(bot, message, dry_run)
+        for cve, _ in items:
+            seen.append(cve["id"])
+            grouped.add(cve["id"])
+        log.info("CVSS 묶음 알림: %s %d건 (%s)", product, len(items), ", ".join(c["id"] for c, _ in items))
+        sent += len(items)
+
+    for cve, scored in todo:
+        if cve["id"] in grouped:
             continue
         score, version, vector = scored
         kev_entry = (kev or {}).get(cve["id"])
@@ -342,10 +422,7 @@ async def check_once(bot, client, dry_run):
         kev_seen.add(cve_id)
         kev_sent += 1
 
-    log.info("CVSS 알림 %d건, KEV 알림 %d건%s", sent, kev_sent, " (dry-run)" if dry_run else "")
-    if not dry_run:
-        # KEV 조회에 실패했으면 다음에 처음부터 다시 비교하도록 기존 값 유지
-        save_state(now, seen, kev_seen if kev is not None or kev_seen else None)
+    return sent, kev_sent
 
 
 async def audit(client, keyword, days):
