@@ -4,7 +4,7 @@ import socket
 
 import telegram
 from dotenv import load_dotenv
-from telegram.error import ChatMigrated, RetryAfter
+from telegram.error import ChatMigrated, NetworkError, RetryAfter
 
 load_dotenv()
 
@@ -41,6 +41,7 @@ class Bot(telegram.Bot):
     텔레그램은 방 설정(권한·관리자 등)을 바꾸면 그룹을 슈퍼그룹으로 바꾸고
     예전 ID로 보내면 새 ID를 알려주며 거절함 → 그 ID로 재전송하고 방에 안내를 남김
     한꺼번에 많이 보내 전송 제한(flood control)에 걸리면 알려준 시간만큼 기다렸다 다시 보냄
+    텔레그램 서버가 잠깐 응답하지 않으면(시간 초과) 잠시 뒤 다시 보냄
     """
     _notified = False
 
@@ -53,6 +54,10 @@ class Bot(telegram.Bot):
                 wait = wait.total_seconds() if hasattr(wait, "total_seconds") else wait
                 print(f"⏳ 텔레그램 전송 제한: {wait}초 기다린 뒤 다시 보냄")
                 await asyncio.sleep(wait + 1)
+            except NetworkError as e:
+                # 텔레그램 서버 응답 지연·일시적 연결 끊김 (TimedOut 포함)
+                print(f"⏳ 텔레그램 연결 문제({e}): 5초 뒤 다시 보냄")
+                await asyncio.sleep(5)
         return await super().send_message(chat_id, *args, **kwargs)
 
     async def send_message(self, chat_id, *args, **kwargs):
