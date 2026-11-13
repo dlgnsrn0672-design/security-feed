@@ -45,6 +45,14 @@ def product_hits(text):
     return [k for k in PRODUCT_KEYWORDS if re.search(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", low)]
 
 
+def hide_products(text):
+    """공개 저장소 로그에 출력할 때 사내 제품명을 가림 (dry-run 출력용)"""
+    text = re.sub(r"(🏢 <b>사내 사용 제품 관련</b>: ).*", r"\1(공개 로그라 숨김)", text)
+    for k in PRODUCT_KEYWORDS:
+        text = re.sub(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", "***", text, flags=re.I)
+    return text
+
+
 def product_line(text):
     hits = product_hits(text)
     return f"🏢 <b>사내 사용 제품 관련</b>: {', '.join(hits)}" if hits else ""

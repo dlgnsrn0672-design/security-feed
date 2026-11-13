@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 
 
 import https_only
-from common import CHAT_ID, TOKEN, Bot, product_hits, product_line
+from common import PRODUCT_KEYWORDS, CHAT_ID, TOKEN, Bot, hide_products, product_hits, product_line
 
 TOKEN = (os.getenv("CVE_TELEGRAM_TOKEN") or "").strip() or TOKEN
 CHAT_ID = (os.getenv("CVE_TELEGRAM_CHAT_ID") or "").strip() or CHAT_ID
@@ -142,6 +142,7 @@ def token_df(titles):
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("kisa_watch")
+log.info("사내 사용 제품 키워드 %d개 설정됨", len(PRODUCT_KEYWORDS))
 
 
 def parse_rss(raw):
@@ -285,7 +286,7 @@ async def main():
     messages = [build_message(*outbox[0])] if len(outbox) == 1 else build_digest(outbox)
     for text in messages:
         if args.dry_run:
-            print(text, "\n" + "-" * 60)
+            print(hide_products(text), "\n" + "-" * 60)
         else:
             await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="HTML",
                                    disable_web_page_preview=True)

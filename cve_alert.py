@@ -18,7 +18,7 @@ from pathlib import Path
 
 import https_only
 import links
-from common import CHAT_ID, TOKEN, Bot, product_hits, product_line
+from common import PRODUCT_KEYWORDS, CHAT_ID, TOKEN, Bot, hide_products, product_hits, product_line
 
 # CVE·KISA 알림은 전용 봇이 있으면 그쪽으로 (없으면 기본 봇)
 TOKEN = (os.getenv("CVE_TELEGRAM_TOKEN") or "").strip() or TOKEN
@@ -45,6 +45,7 @@ KEV_FIRST_RUN_DAYS = int(os.getenv("KEV_FIRST_RUN_DAYS", "3"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("cve_alert")
+log.info("사내 사용 제품 키워드 %d개 설정됨", len(PRODUCT_KEYWORDS))
 
 
 def load_state():
@@ -343,7 +344,7 @@ def build_digest(entries, kev_ids=(), per_msg=15):
 
 async def send(bot, message, dry_run):
     if dry_run:
-        print(message, "\n" + "-" * 60)
+        print(hide_products(message), "\n" + "-" * 60)
         return
     await bot.send_message(
         chat_id=CHAT_ID, text=message,
