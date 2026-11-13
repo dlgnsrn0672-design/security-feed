@@ -18,7 +18,7 @@ from pathlib import Path
 
 import https_only
 import links
-from common import CHAT_ID, TOKEN, Bot
+from common import CHAT_ID, TOKEN, Bot, product_hits, product_line
 
 # CVE·KISA 알림은 전용 봇이 있으면 그쪽으로 (없으면 기본 봇)
 TOKEN = (os.getenv("CVE_TELEGRAM_TOKEN") or "").strip() or TOKEN
@@ -241,6 +241,8 @@ def build_message(cve, score, version, vector, description_ko, kev=None, epss=No
         f"공개일: {published}",
         epss_line(epss),
     ]
+    if product_line(english_description(cve)):
+        lines.insert(2, product_line(english_description(cve)))
     if cwes:
         lines.append(f"유형: {', '.join(cwes)}")
     if kev:
@@ -260,6 +262,9 @@ def build_kev_message(kev, cve, description_ko, already_alerted, epss=None):
     cve_id = kev["cveID"]
     title = "🔴 <b>실제 악용 취약점 신규 등록 (CISA KEV)</b>"
     lines = [title, ""]
+    mine = product_line(f"{kev['vendorProject']} {kev['product']} {kev.get('shortDescription', '')}")
+    if mine:
+        lines += [mine, ""]
     if already_alerted:
         lines += ["ℹ️ 앞서 CVSS 알림을 보낸 취약점이 <b>실제 공격에 쓰이는 것으로 확인</b>되었습니다", ""]
     lines += [
@@ -325,10 +330,13 @@ def build_digest(entries, kev_ids=(), per_msg=15):
         for cve, score, summary_ko, epss in entries[i:i + per_msg]:
             product = product_key(cve) or ""
             flag = "⚠️<b>실제 악용</b> " if cve["id"] in kev_ids else ""
+            flag = ("🏢 " if product_hits(english_description(cve)) else "") + flag
             lines.append(f'{flag}<b>{score}</b> <a href="https://nvd.nist.gov/vuln/detail/{cve["id"]}">{cve["id"]}</a> '
                          f"{html.escape(product)} · {epss_badge(epss)}")
             lines.append(f"   └ {html.escape(summary_ko[:90])}")
         lines += ["", "→ 사내 사용 제품이 있으면 CVE를 눌러 상세·패치 정보 확인"]
+        if any(product_hits(english_description(e[0])) for e in entries[i:i + per_msg]):
+            lines.append("🏢 = 사내 사용 제품 관련")
         msgs.append("\n".join(lines))
     return msgs
 

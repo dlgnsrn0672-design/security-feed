@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import socket
 
 import telegram
@@ -33,6 +34,20 @@ def require_env(name):
 
 TOKEN = require_env("TELEGRAM_TOKEN")
 CHAT_ID = require_env("TELEGRAM_CHAT_ID")
+
+# 사내 사용 제품 (쉼표 구분). 공개 저장소라 목록은 코드가 아니라 GitHub Secret PRODUCT_KEYWORDS에만 둠
+PRODUCT_KEYWORDS = [k.strip().lower() for k in (os.getenv("PRODUCT_KEYWORDS") or "").split(",") if k.strip()]
+
+
+def product_hits(text):
+    """글에 나오는 사내 사용 제품 (단어 단위로 비교: 'api'가 'rapid'에 걸리지 않게)"""
+    low = (text or "").lower()
+    return [k for k in PRODUCT_KEYWORDS if re.search(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", low)]
+
+
+def product_line(text):
+    hits = product_hits(text)
+    return f"🏢 <b>사내 사용 제품 관련</b>: {', '.join(hits)}" if hits else ""
 
 
 class Bot(telegram.Bot):

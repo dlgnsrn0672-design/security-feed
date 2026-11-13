@@ -61,6 +61,7 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
           DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
           AUDIT: ${{ inputs.audit }}
+          PRODUCT_KEYWORDS: ${{ secrets.PRODUCT_KEYWORDS }}
           MIN_CVSS_SCORE: "9.0"
           MAX_CVE_AGE_DAYS: "30"
           # 기존 비공개 저장소에서 이미 보낸 알림이 다시 오지 않도록 첫 실행은 최근분만
@@ -73,6 +74,7 @@ jobs:
         env:
           FEED_FIRST_RUN_SHOW: "0"
           DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
+          PRODUCT_KEYWORDS: ${{ secrets.PRODUCT_KEYWORDS }}
 
       - uses: actions/cache/save@v4
         if: always() && !inputs.dry_run && !inputs.audit

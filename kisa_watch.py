@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 
 
 import https_only
-from common import CHAT_ID, TOKEN, Bot
+from common import CHAT_ID, TOKEN, Bot, product_hits, product_line
 
 TOKEN = (os.getenv("CVE_TELEGRAM_TOKEN") or "").strip() or TOKEN
 CHAT_ID = (os.getenv("CVE_TELEGRAM_CHAT_ID") or "").strip() or CHAT_ID
@@ -40,18 +40,31 @@ FEEDS = {
 # 영문 피드는 제목을 한국어로 번역해서 보냄 (DeepL 키가 없으면 원문)
 TRANSLATE_FEEDS = {"csn"}
 DEEPL_API_KEY = (os.getenv("DEEPL_API_KEY") or "").strip()
-FILTERED_FEEDS = {"dailysecu"}
+FILTERED_FEEDS = {"dailysecu", "csn"}
 
 
 # 보안 단어가 들어가도 실무 정보가 아닌 연재물은 제외
 EXCLUDE_KEYWORDS = ("연재소설",)
 
 
+# 영문 기사: 사고·취약점·한국 관련만 (단어 단위 비교)
+EN_KEYWORDS = re.compile(
+    r"\b(zero[- ]?days?|0[- ]?days?|exploit\w*|ransomware|breach\w*|leak\w*|vulnerabilit\w*|flaws?|cve-\d+"
+    r"|rce|remote code|malware|phishing|backdoor\w*|apt\d*|botnet\w*|\w*stealer|trojan\w*|hack\w*"
+    r"|attack\w*|compromis\w*|ddos|outage\w*|patch\w*|security update\w*|actively|wiper|spyware"
+    r"|korea\w*|lazarus|kimsuky|andariel)\b", re.I)
+# 실무 정보가 아닌 목록·홍보성 기사
+EN_EXCLUDE = re.compile(r"\b(top \d+|best \w+|webinar|how to|guide to|free tools?|sponsored)\b", re.I)
+
+
 def is_security_news(title):
+    """보안 사고·취약점 기사이거나 사내 사용 제품 관련 기사인지"""
+    if product_hits(title):
+        return True
     low = title.lower()
-    if any(k in low for k in EXCLUDE_KEYWORDS):
+    if any(k in low for k in EXCLUDE_KEYWORDS) or EN_EXCLUDE.search(title):
         return False
-    return any(k in low for k in SECURITY_KEYWORDS)
+    return any(k in low for k in SECURITY_KEYWORDS) or bool(EN_KEYWORDS.search(title))
 # 처음 실행할 때 피드별로 최근 몇 건만 보냄 (0이면 기존 글은 기록만)
 FIRST_RUN_SHOW = int(os.getenv("FEED_FIRST_RUN_SHOW", "3"))
 # 일반 IT 기사가 섞인 피드는 제목에 이 단어가 있는 기사만 보냄
@@ -192,6 +205,8 @@ async def translate_titles(client, items):
 def build_message(item, icon, label):
     title = item.get("title_ko") or item["title"]
     lines = [f"{icon} <b>{label}</b>", "", f"<b>{html.escape(title)}</b>"]
+    if product_line(item["title"]):
+        lines.append(product_line(item["title"]))
     if item["date"]:
         lines.append(f"게시: {html.escape(item['date'][:25])}")
     lines += ["", f'🔗 <a href="{html.escape(item["link"])}">원문</a>']
@@ -208,9 +223,12 @@ def build_digest(outbox, per_msg=15):
         lines = [f"📰 <b>새 보안 소식 {len(outbox)}건</b>" + (f" ({i // per_msg + 1}/{pages})" if pages > 1 else ""), ""]
         for it, icon, label in outbox[i:i + per_msg]:
             title = it.get("title_ko") or it["title"]
-            lines.append(f'{icon} [{label}] <a href="{html.escape(it["link"])}">{html.escape(title)}</a>')
+            mark = "🏢 " if product_hits(it["title"]) else ""
+            lines.append(f'{mark}{icon} [{label}] <a href="{html.escape(it["link"])}">{html.escape(title)}</a>')
         if any(re.search(r"업데이트|패치|취약점", it.get("title_ko") or it["title"]) for it, _, _ in outbox[i:i + per_msg]):
             lines += ["", "→ 업데이트·패치 공지는 사내 사용 제품이면 패치 일정 확인"]
+        if any(product_hits(it["title"]) for it, _, _ in outbox[i:i + per_msg]):
+            lines.append("🏢 = 사내 사용 제품 관련 기사")
         msgs.append("\n".join(lines))
     return msgs
 
