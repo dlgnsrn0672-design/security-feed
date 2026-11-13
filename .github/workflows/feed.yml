@@ -72,6 +72,7 @@ jobs:
         run: python kisa_watch.py --latest ${{ inputs.latest || '0' }} ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           FEED_FIRST_RUN_SHOW: "0"
+          DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
 
       - uses: actions/cache/save@v4
         if: always() && !inputs.dry_run && !inputs.audit

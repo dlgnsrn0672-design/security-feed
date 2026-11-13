@@ -1,4 +1,4 @@
-"""KISA(보호나라/KNVD) 보안공지·보안뉴스·데일리시큐 → 텔레그램 알림 (CVE 전용 봇)
+"""KISA(보호나라/KNVD) 보안공지·보안뉴스·데일리시큐·Cyber Security News → 텔레그램 알림 (CVE 전용 봇)
 
 실행:  python kisa_watch.py [--dry-run]
 """
@@ -35,7 +35,11 @@ FEEDS = {
         "https://www.dailysecu.com/rss/allArticle.xml",
         "https://www.dailysecu.com/rss/S1N1.xml",
     )),
+    "csn": ("🌐", "Cyber Security News", ("https://cybersecuritynews.com/feed/",)),
 }
+# 영문 피드는 제목을 한국어로 번역해서 보냄 (DeepL 키가 없으면 원문)
+TRANSLATE_FEEDS = {"csn"}
+DEEPL_API_KEY = (os.getenv("DEEPL_API_KEY") or "").strip()
 FILTERED_FEEDS = {"dailysecu"}
 
 
@@ -169,12 +173,31 @@ async def fetch_notices(client, sources):
     return None
 
 
+async def translate_titles(client, items):
+    """영문 제목들을 한 번에 번역해서 item['title_ko']에 넣음 (실패하면 원문 유지)"""
+    if not items or not DEEPL_API_KEY:
+        return
+    host = "api-free.deepl.com" if DEEPL_API_KEY.endswith(":fx") else "api.deepl.com"
+    try:
+        resp = await client.post(f"https://{host}/v2/translate",
+                                 headers={"Authorization": f"DeepL-Auth-Key {DEEPL_API_KEY}"},
+                                 json={"text": [it["title"] for it in items], "source_lang": "EN", "target_lang": "KO"})
+        resp.raise_for_status()
+        for it, tr in zip(items, resp.json()["translations"]):
+            it["title_ko"] = tr["text"]
+    except Exception as e:
+        log.warning("제목 번역 실패, 원문 사용: %s", e)
+
+
 def build_message(item, icon, label):
-    lines = [f"{icon} <b>{label}</b>", "", f"<b>{html.escape(item['title'])}</b>"]
+    title = item.get("title_ko") or item["title"]
+    lines = [f"{icon} <b>{label}</b>", "", f"<b>{html.escape(title)}</b>"]
+    if item.get("title_ko"):
+        lines.append(f"<i>{html.escape(item['title'])}</i>")
     if item["date"]:
         lines.append(f"게시: {html.escape(item['date'][:25])}")
     lines += ["", f'🔗 <a href="{html.escape(item["link"])}">원문</a>']
-    if re.search(r"업데이트|패치|취약점", item["title"]):
+    if re.search(r"업데이트|패치|취약점", title):
         lines.append("→ 사내 사용 제품이면 패치 일정 확인")
     return "\n".join(lines)
 
@@ -186,8 +209,9 @@ def build_digest(outbox, per_msg=15):
     for i in range(0, len(outbox), per_msg):
         lines = [f"📰 <b>새 보안 소식 {len(outbox)}건</b>" + (f" ({i // per_msg + 1}/{pages})" if pages > 1 else ""), ""]
         for it, icon, label in outbox[i:i + per_msg]:
-            lines.append(f'{icon} [{label}] <a href="{html.escape(it["link"])}">{html.escape(it["title"])}</a>')
-        if any(re.search(r"업데이트|패치|취약점", it["title"]) for it, _, _ in outbox[i:i + per_msg]):
+            title = it.get("title_ko") or it["title"]
+            lines.append(f'{icon} [{label}] <a href="{html.escape(it["link"])}">{html.escape(title)}</a>')
+        if any(re.search(r"업데이트|패치|취약점", it.get("title_ko") or it["title"]) for it, _, _ in outbox[i:i + per_msg]):
             lines += ["", "→ 업데이트·패치 공지는 사내 사용 제품이면 패치 일정 확인"]
         msgs.append("\n".join(lines))
     return msgs
@@ -236,6 +260,8 @@ async def main():
                     kept.append(it)
                     recent.append({"feed": key, "title": it["title"], "ts": now})
                 to_send = kept[::-1]
+            if key in TRANSLATE_FEEDS:
+                await translate_titles(client, to_send)
             outbox += [(it, icon, label) for it in reversed(to_send)]
             log.info("%s 새 글 %d건, 알림 %d건", label, len(new), len(to_send))
             state[key] = (seen + [it["link"] for it in new])[-MAX_SEEN:]
