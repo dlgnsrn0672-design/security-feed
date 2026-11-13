@@ -192,8 +192,6 @@ async def translate_titles(client, items):
 def build_message(item, icon, label):
     title = item.get("title_ko") or item["title"]
     lines = [f"{icon} <b>{label}</b>", "", f"<b>{html.escape(title)}</b>"]
-    if item.get("title_ko"):
-        lines.append(f"<i>{html.escape(item['title'])}</i>")
     if item["date"]:
         lines.append(f"게시: {html.escape(item['date'][:25])}")
     lines += ["", f'🔗 <a href="{html.escape(item["link"])}">원문</a>']
