@@ -5,7 +5,8 @@ import socket
 
 import telegram
 from dotenv import load_dotenv
-from telegram.error import ChatMigrated, NetworkError, RetryAfter
+from telegram.error import ChatMigrated, NetworkError, RetryAfter, TimedOut
+from telegram.request import HTTPXRequest
 
 load_dotenv()
 
@@ -64,11 +65,18 @@ class Bot(telegram.Bot):
     텔레그램은 방 설정(권한·관리자 등)을 바꾸면 그룹을 슈퍼그룹으로 바꾸고
     예전 ID로 보내면 새 ID를 알려주며 거절함 → 그 ID로 재전송하고 방에 안내를 남김
     한꺼번에 많이 보내 전송 제한(flood control)에 걸리면 알려준 시간만큼 기다렸다 다시 보냄
-    텔레그램 서버가 잠깐 응답하지 않으면(시간 초과) 잠시 뒤 다시 보냄
+    연결 자체가 안 되면 잠시 뒤 다시 보냄. 응답만 늦은 경우(시간 초과)는 이미 전달됐을 수 있어
+    한 번만 다시 보냄 (여러 번 재전송하면 같은 메시지가 중복으로 올라옴)
     """
     _notified = False
 
+    def __init__(self, token, *args, **kwargs):
+        # 기본 응답 대기(5초)가 짧아 긴 메시지가 전달되고도 시간 초과로 처리되는 일이 있어 넉넉히
+        kwargs.setdefault("request", HTTPXRequest(connect_timeout=10, read_timeout=30, write_timeout=30))
+        super().__init__(token, *args, **kwargs)
+
     async def _send(self, chat_id, *args, **kwargs):
+        timed_out = False
         for _ in range(5):
             try:
                 return await super().send_message(chat_id, *args, **kwargs)
@@ -77,8 +85,14 @@ class Bot(telegram.Bot):
                 wait = wait.total_seconds() if hasattr(wait, "total_seconds") else wait
                 print(f"⏳ 텔레그램 전송 제한: {wait}초 기다린 뒤 다시 보냄")
                 await asyncio.sleep(wait + 1)
+            except TimedOut:
+                if timed_out:
+                    raise
+                timed_out = True
+                print("⏳ 텔레그램 응답 시간 초과: 10초 뒤 한 번만 다시 보냄")
+                await asyncio.sleep(10)
             except NetworkError as e:
-                # 텔레그램 서버 응답 지연·일시적 연결 끊김 (TimedOut 포함)
+                # 연결 실패 등 전송 전 단계 오류 → 메시지가 가지 않았으니 다시 보내도 중복 없음
                 print(f"⏳ 텔레그램 연결 문제({e}): 5초 뒤 다시 보냄")
                 await asyncio.sleep(5)
         return await super().send_message(chat_id, *args, **kwargs)
