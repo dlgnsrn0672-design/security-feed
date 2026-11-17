@@ -7,13 +7,12 @@ jobs:
     steps:
       - run: |
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-          for u in \
-            "https://www.ncsc.go.kr:4018/main/cop/bbs/selectBoardList.do?bbsId=SecurityAdvice_main&menuNo=020101" \
-            "https://www.ncsc.go.kr/main/cop/bbs/selectBoardList.do?bbsId=SecurityAdvice_main" \
-            "https://www.ncsc.go.kr/PageLink.do?link=forward:/cop/bbs/selectBoardList.do?bbsId%3DSecurityAdvice_main" \
-            "https://www.ncsc.go.kr/"; do
-            echo "=== $u"
-            curl -sSL -m 25 -A "$UA" -o page.html -w "HTTP %{http_code} -> %{url_effective} (%{size_download} bytes)\n" "$u" || echo "curl failed"
-            grep -oE "SecurityAdvice[^\"' ]{0,120}|nttId[^\"' ]{0,40}|fn_[A-Za-z]+\([^)]{0,60}\)|<title>[^<]*" page.html | sort | uniq -c | sort -rn | head -15
-            grep -oE "<a [^>]{0,300}>[^<]{0,120}" page.html | grep -iE "nttId|SecurityAdvice|fn_|view" | head -8
+          curl -sSL -m 25 -A "$UA" -o main.html "https://www.ncsc.go.kr/ko/main/main.html"
+          echo "=== hrefs"; grep -oE "href=\"[^\"]{3,200}\"" main.html | sort -u | grep -viE "\.(css|png|jpg|ico|svg)|javascript:void" | head -80
+          echo "=== 권고 context"; grep -oE ".{0,200}보안권고.{0,200}" main.html | head -8
+          echo "=== nttId context"; grep -oE ".{0,250}nttId.{0,250}" main.html | head -5
+          echo "=== scripts/api"; grep -oE "(fetch|ajax|url)\s*[:(]\s*['\"][^'\"]{3,150}" main.html | head -20
+          for p in $(grep -oE "src=\"[^\"]*\.js[^\"]*\"" main.html | sed 's/src="//;s/"$//' | grep -v -i jquery | head -8); do
+            case $p in http*) u=$p;; /*) u="https://www.ncsc.go.kr$p";; *) u="https://www.ncsc.go.kr/ko/main/$p";; esac
+            echo "=== js $u"; curl -sSL -m 20 -A "$UA" "$u" | grep -oE "['\"][^'\"]*(api|board|bbs|advice|Advice|notice)[^'\"]{0,120}['\"]" | sort -u | head -15
           done
