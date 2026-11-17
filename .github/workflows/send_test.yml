@@ -7,6 +7,14 @@ on:
         description: "보낼 내용 (비우면 시험 메시지, HTML 사용 가능)"
         type: string
         default: ""
+      article_url:
+        description: "기사 주소 (넣으면 제목·요약을 읽어 뉴스 알림으로 한 번 보냄)"
+        type: string
+        default: ""
+      dry_run:
+        description: "보내지 않고 로그로만 확인"
+        type: boolean
+        default: false
 
 jobs:
   send:
@@ -17,9 +25,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install python-telegram-bot==22.8
+      - run: pip install -r requirements.txt
       - run: python send_test.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           MESSAGE: ${{ inputs.message }}
+          ARTICLE_URL: ${{ inputs.article_url }}
+          DRY_RUN: ${{ inputs.dry_run }}
