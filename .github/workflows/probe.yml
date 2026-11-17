@@ -7,12 +7,14 @@ jobs:
     steps:
       - run: |
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-          curl -sSL -m 25 -A "$UA" -o main.html "https://www.ncsc.go.kr/ko/main/main.html"
-          echo "=== hrefs"; grep -oE "href=\"[^\"]{3,200}\"" main.html | sort -u | grep -viE "\.(css|png|jpg|ico|svg)|javascript:void" | head -80
-          echo "=== 권고 context"; grep -oE ".{0,200}보안권고.{0,200}" main.html | head -8
-          echo "=== nttId context"; grep -oE ".{0,250}nttId.{0,250}" main.html | head -5
-          echo "=== scripts/api"; grep -oE "(fetch|ajax|url)\s*[:(]\s*['\"][^'\"]{3,150}" main.html | head -20
-          for p in $(grep -oE "src=\"[^\"]*\.js[^\"]*\"" main.html | sed 's/src="//;s/"$//' | grep -v -i jquery | head -8); do
-            case $p in http*) u=$p;; /*) u="https://www.ncsc.go.kr$p";; *) u="https://www.ncsc.go.kr/ko/main/$p";; esac
-            echo "=== js $u"; curl -sSL -m 20 -A "$UA" "$u" | grep -oE "['\"][^'\"]*(api|board|bbs|advice|Advice|notice)[^'\"]{0,120}['\"]" | sort -u | head -15
+          B=https://www.ncsc.go.kr
+          curl -sSL -m 25 -A "$UA" -c jar -b jar -o main.html "$B/ko/main/main.html"
+          echo "=== quick menu"; grep -oE ".{0,300}quick3.{0,100}" main.html | head -3
+          echo "=== onclick/goPage"; grep -oE "on[a-z]+=\"[^\"]{0,160}\"" main.html | sort -u | head -30
+          echo "=== inline .do/.html urls"; grep -oE "['\"][^'\" ]*\.(do|json|html)[^'\" ]*['\"]" main.html | sort -u | head -40
+          for f in common2025.js cmmGridTabulator.js nform.js ui.js customCrypto.js; do
+            echo "=== $f"; curl -sSL -m 20 -A "$UA" "$B/ko/js/common/$f" | grep -oE "['\"][^'\" ]*\.(do|json|html)[^'\" ]*['\"]|function [A-Za-z_]+\([^)]*\)" | sort -u | head -25
+          done
+          for t in $(grep -oE "PageLink.html\?token=[A-Za-z0-9_-]+" main.html | sort -u); do
+            echo "=== $t"; curl -sSL -m 20 -A "$UA" -c jar -b jar "$B/ko/main/$t" -o p.html -w "HTTP %{http_code} %{url_effective}\n"; grep -oE "<title>[^<]*|<h[1-3][^>]*>[^<]{0,80}" p.html | head -4
           done
