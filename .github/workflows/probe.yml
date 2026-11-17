@@ -11,7 +11,7 @@ jobs:
       - run: pip install -q playwright==1.48.0 && python -m playwright install --with-deps chromium > /dev/null
       - run: |
           cat > p.py <<'PY'
-          import asyncio
+          import asyncio, re
           from playwright.async_api import async_playwright
           async def main():
               async with async_playwright() as p:
@@ -20,22 +20,17 @@ jobs:
                   await pg.goto("https://www.ncsc.go.kr/ko/main/main.html", wait_until="load", timeout=60000); await pg.wait_for_timeout(3000)
                   await pg.wait_for_timeout(3000)
                   links = await pg.eval_on_selector_all("a", "els => els.map(e => [e.innerText.trim().replace(/\\s+/g,' '), e.getAttribute('href')||''])")
-                  seen = set()
-                  for t,h in links:
-                      if t and (t,h) not in seen and len(t) < 30:
-                          seen.add((t,h)); print("MENU:", t, "|", h[-40:])
-                  body = await pg.inner_text("body")
-                  i = body.find("보안권고")
-                  while i != -1 and i < len(body):
-                      print("CTX:", body[max(0,i-80):i+300].replace("\n"," / ")); i = body.find("보안권고", i+300)
-                  # 메뉴 중 '권고'가 들어간 링크로 이동해서 목록 확인
-                  for t,h in links:
-                      if "권고" in t and "PageLink" in h:
-                          await pg.goto("https://www.ncsc.go.kr" + h, wait_until="load", timeout=60000); await pg.wait_for_timeout(5000)
-                          print("PAGE:", t, pg.url); b2 = await pg.inner_text("body"); print("PAGEBODY:", b2[:2500].replace("\n"," / "))
-                          rows = await pg.eval_on_selector_all("a", "els => els.map(e => e.innerText.trim().replace(/\\s+/g,' ').slice(0,80) + ' | ' + (e.getAttribute('href')||'').slice(-60) + ' | ' + (e.getAttribute('onclick')||'').slice(0,80))")
-                          print("PAGELINKS:", *[r for r in rows if len(r.split(' | ')[0]) > 12][:25], sep="\n  ")
-                          break
+                  mores = [h for t,h in links if t == "더보기" and "PageLink" in h]
+                  print("MORES:", len(mores))
+                  for h in mores:
+                      await pg.goto("https://www.ncsc.go.kr" + h, wait_until="load", timeout=60000); await pg.wait_for_timeout(5000)
+                      body = await pg.inner_text("body")
+                      i = body.find("권고"); print("== PAGE", h[-20:], "| heading:", body[max(0,i-60):i+60].replace("\n"," / ") if i>=0 else "(no 권고)")
+                      rows = await pg.eval_on_selector_all("a, tr, li", "els => els.map(e => [e.tagName, e.innerText.trim().replace(/\\s+/g,' ').slice(0,100), (e.getAttribute('href')||'').slice(0,120), (e.getAttribute('onclick')||'').slice(0,100)])")
+                      n = 0
+                      for tag,t,hh,oc in rows:
+                          if len(t) > 15 and re.search(r"20\d\d", t) and n < 12:
+                              print("  ROW:", tag, t, "|", hh, "|", oc); n += 1
                   await b.close()
           asyncio.run(main())
           PY
