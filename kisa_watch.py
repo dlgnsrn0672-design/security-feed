@@ -277,6 +277,12 @@ async def main():
                     kept.append(it)
                     recent.append({"feed": key, "title": it["title"], "ts": now})
                 to_send = kept[::-1]
+            if key == "kisa":
+                # 국가사이버안보센터 권고와 겹치는지 비교할 수 있게 최근 KISA 공지 제목을 2주간 보관
+                known = {r["title"] for r in state.get("kisa_titles", [])}
+                titles = [r for r in state.get("kisa_titles", []) if now - r["ts"] < 14 * 86400]
+                titles += [{"title": it["title"], "ts": now} for it in items if it["title"] not in known]
+                state["kisa_titles"] = titles[-100:]
             if key in TRANSLATE_FEEDS:
                 await translate_titles(client, to_send)
             outbox += [(it, icon, label) for it in reversed(to_send)]

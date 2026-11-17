@@ -1,0 +1,64 @@
+name: NCSC Advisory
+
+on:
+  # 정부 권고는 자주 올라오지 않아 1시간마다 확인 (공개 저장소라 실행 시간 무료)
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "텔레그램 전송 없이 로그로만 출력"
+        type: boolean
+        default: false
+      latest:
+        description: "이미 본 권고여도 최신 N건 다시 전송 (0이면 새 글만)"
+        type: string
+        default: "0"
+
+concurrency:
+  group: ncsc
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      PRODUCT_KEYWORDS: ${{ secrets.PRODUCT_KEYWORDS }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # NCSC 사이트는 목록을 브라우저 스크립트로 그려서 헤드리스 브라우저 필요
+      - run: pip install -r requirements.txt playwright==1.48.0
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.48.0
+      - run: python -m playwright install --with-deps chromium
+
+      # KISA 보안공지와 겹치는지 비교용 (읽기만)
+      - uses: actions/cache/restore@v4
+        with:
+          path: kisa_state.json
+          key: kisa-state-${{ github.run_id }}
+          restore-keys: kisa-state-
+      - uses: actions/cache/restore@v4
+        with:
+          path: ncsc_state.json
+          key: ncsc-state-${{ github.run_id }}
+          restore-keys: ncsc-state-
+
+      - run: python ncsc_watch.py --latest ${{ inputs.latest || '0' }} ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - uses: actions/cache/save@v4
+        if: always() && !inputs.dry_run
+        with:
+          path: ncsc_state.json
+          key: ncsc-state-${{ github.run_id }}
