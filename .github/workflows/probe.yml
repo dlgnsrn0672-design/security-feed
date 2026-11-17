@@ -3,18 +3,33 @@ on: workflow_dispatch
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q playwright==1.48.0 && python -m playwright install --with-deps chromium > /dev/null
       - run: |
-          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-          B=https://www.ncsc.go.kr
-          curl -sSL -m 25 -A "$UA" -c jar -b jar -o main.html "$B/ko/main/main.html"
-          echo "=== quick menu"; grep -oE ".{0,300}quick3.{0,100}" main.html | head -3
-          echo "=== onclick/goPage"; grep -oE "on[a-z]+=\"[^\"]{0,160}\"" main.html | sort -u | head -30
-          echo "=== inline .do/.html urls"; grep -oE "['\"][^'\" ]*\.(do|json|html)[^'\" ]*['\"]" main.html | sort -u | head -40
-          for f in common2025.js cmmGridTabulator.js nform.js ui.js customCrypto.js; do
-            echo "=== $f"; curl -sSL -m 20 -A "$UA" "$B/ko/js/common/$f" | grep -oE "['\"][^'\" ]*\.(do|json|html)[^'\" ]*['\"]|function [A-Za-z_]+\([^)]*\)" | sort -u | head -25
-          done
-          for t in $(grep -oE "PageLink.html\?token=[A-Za-z0-9_-]+" main.html | sort -u); do
-            echo "=== $t"; curl -sSL -m 20 -A "$UA" -c jar -b jar "$B/ko/main/$t" -o p.html -w "HTTP %{http_code} %{url_effective}\n"; grep -oE "<title>[^<]*|<h[1-3][^>]*>[^<]{0,80}" p.html | head -4
-          done
+          cat > p.py <<'PY'
+          import asyncio
+          from playwright.async_api import async_playwright
+          async def main():
+              async with async_playwright() as p:
+                  b = await p.chromium.launch()
+                  pg = await b.new_page(locale="ko-KR")
+                  await pg.goto("https://www.ncsc.go.kr/ko/main/main.html", wait_until="networkidle")
+                  reqs = []
+                  pg.on("request", lambda r: reqs.append(r.method + " " + r.url) if r.resource_type in ("xhr", "fetch", "document") else None)
+                  await pg.get_by_text("보안권고문", exact=True).first.click()
+                  await pg.wait_for_load_state("networkidle"); await pg.wait_for_timeout(3000)
+                  print("URL:", pg.url); print("TITLE:", await pg.title())
+                  print("REQS:", *reqs[:15], sep="\n  ")
+                  body = await pg.inner_text("body")
+                  i = body.find("보안권고")
+                  print("BODY:", body[max(0, i-200):i+2500])
+                  rows = await pg.eval_on_selector_all("table tr, .tabulator-row, ul.board li, .list li", "els => els.slice(0,15).map(e => e.innerText.replace(/\\s+/g,' ').slice(0,150) + ' || ' + (e.querySelector('a') ? (e.querySelector('a').getAttribute('href')||'') + ' ' + (e.querySelector('a').getAttribute('onclick')||'') : '') + ' ' + (e.getAttribute('onclick')||''))")
+                  print("ROWS:", *rows, sep="\n  ")
+                  await b.close()
+          asyncio.run(main())
+          PY
+          python p.py
