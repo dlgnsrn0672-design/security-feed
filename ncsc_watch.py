@@ -65,24 +65,34 @@ async def read_board(page, href):
     return items
 
 
+async def main_links(page):
+    """메인 화면의 메뉴 링크 [(이름, 주소)] — 느릴 때 한 번 더 시도"""
+    for attempt in range(2):
+        try:
+            await page.goto(MAIN, wait_until="load", timeout=90000)
+            break
+        except Exception as e:
+            if attempt:
+                raise
+            log.warning("NCSC 접속 지연, 다시 시도: %s", e)
+    await page.wait_for_timeout(3000)
+    return await page.eval_on_selector_all(
+        "a", "els => els.map(e => [e.textContent.replace(/\\s+/g, ' ').trim(), e.getAttribute('href') || ''])")
+
+
 async def fetch_boards():
     """{키: 목록} — 메뉴 이름으로 게시판 주소를 찾아 들어감 (주소가 접속마다 바뀜)"""
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page(locale="ko-KR")
-        for attempt in range(2):
-            try:
-                await page.goto(MAIN, wait_until="load", timeout=90000)
-                break
-            except Exception as e:
-                if attempt:
-                    raise
-                log.warning("NCSC 접속 지연, 다시 시도: %s", e)
-        await page.wait_for_timeout(3000)
-        links = await page.eval_on_selector_all(
-            "a", "els => els.map(e => [e.textContent.replace(/\\s+/g, ' ').trim(), e.getAttribute('href') || ''])")
         result = {}
         for key, menu, *_ in BOARDS:
+            # 메뉴 주소(토큰)는 방금 연 메인 화면에서만 유효해서 게시판마다 메인부터 다시 들어감
+            try:
+                links = await main_links(page)
+            except Exception as e:
+                log.warning("NCSC 메인 접속 실패: %s", e)
+                break
             href = next((h for t, h in links if t == menu and "PageLink" in h), None)
             if key == "notice" and not href:
                 href = next((h for t, h in links if t == "더보기" and "PageLink" in h), None)
@@ -124,7 +134,9 @@ async def main():
     sent_titles = []  # 보안권고문과 공지사항에 같은 글이 올라오면 한 번만
 
     for key, menu, title_line, where, advisory in BOARDS:
-        if key not in boards:
+        if not boards.get(key):
+            # 목록을 못 읽었으면 기록을 건드리지 않음 (빈 기록이 남으면 다음에 기존 글이 전부 새 글로 보임)
+            log.warning("%s: 목록을 읽지 못해 이번에는 건너뜀", menu)
             continue
         items = boards[key]
         if key == "notice":
