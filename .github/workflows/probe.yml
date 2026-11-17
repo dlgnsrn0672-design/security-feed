@@ -1,0 +1,19 @@
+name: Probe (temporary)
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+          for u in \
+            "https://www.ncsc.go.kr:4018/main/cop/bbs/selectBoardList.do?bbsId=SecurityAdvice_main&menuNo=020101" \
+            "https://www.ncsc.go.kr/main/cop/bbs/selectBoardList.do?bbsId=SecurityAdvice_main" \
+            "https://www.ncsc.go.kr/PageLink.do?link=forward:/cop/bbs/selectBoardList.do?bbsId%3DSecurityAdvice_main" \
+            "https://www.ncsc.go.kr/"; do
+            echo "=== $u"
+            curl -sSL -m 25 -A "$UA" -o page.html -w "HTTP %{http_code} -> %{url_effective} (%{size_download} bytes)\n" "$u" || echo "curl failed"
+            grep -oE "SecurityAdvice[^\"' ]{0,120}|nttId[^\"' ]{0,40}|fn_[A-Za-z]+\([^)]{0,60}\)|<title>[^<]*" page.html | sort | uniq -c | sort -rn | head -15
+            grep -oE "<a [^>]{0,300}>[^<]{0,120}" page.html | grep -iE "nttId|SecurityAdvice|fn_|view" | head -8
+          done
