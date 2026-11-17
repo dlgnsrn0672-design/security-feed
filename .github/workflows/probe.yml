@@ -18,17 +18,11 @@ jobs:
                   b = await p.chromium.launch()
                   pg = await b.new_page(locale="ko-KR")
                   await pg.goto("https://www.ncsc.go.kr/ko/main/main.html", wait_until="load", timeout=60000); await pg.wait_for_timeout(3000)
-                  reqs = []
-                  pg.on("request", lambda r: reqs.append(r.method + " " + r.url) if r.resource_type in ("xhr", "fetch", "document") else None)
-                  await pg.get_by_text("보안권고문", exact=True).first.click()
-                  await pg.wait_for_load_state("load"); await pg.wait_for_timeout(5000)
-                  print("URL:", pg.url); print("TITLE:", await pg.title())
-                  print("REQS:", *reqs[:15], sep="\n  ")
-                  body = await pg.inner_text("body")
-                  i = body.find("보안권고")
-                  print("BODY:", body[max(0, i-200):i+2500])
-                  rows = await pg.eval_on_selector_all("table tr, .tabulator-row, ul.board li, .list li", "els => els.slice(0,15).map(e => e.innerText.replace(/\\s+/g,' ').slice(0,150) + ' || ' + (e.querySelector('a') ? (e.querySelector('a').getAttribute('href')||'') + ' ' + (e.querySelector('a').getAttribute('onclick')||'') : '') + ' ' + (e.getAttribute('onclick')||''))")
-                  print("ROWS:", *rows, sep="\n  ")
+                  links = await pg.eval_on_selector_all("a", "els => els.map(e => [e.innerText.trim().replace(/\\s+/g,' '), e.getAttribute('href')||'', e.getAttribute('onclick')||'', e.offsetParent!==null])")
+                  for t,h,o,v in links:
+                      if any(k in t for k in ("권고","공지","자료","보안")) or "권고" in (h+o):
+                          print("LINK:", v, t[:40], "|", h[:160], "|", o[:160])
+                  print("URL:", pg.url)
                   await b.close()
           asyncio.run(main())
           PY
