@@ -100,7 +100,12 @@ async def fetch_boards():
                 log.warning("'%s' 메뉴를 찾지 못함 (사이트 구조 변경 가능성)", menu)
                 continue
             try:
-                result[key] = await read_board(page, href)
+                items = await read_board(page, href)
+                if not items:
+                    # 목록이 늦게 그려져 비어 보이는 경우가 있어 조금 더 기다렸다 한 번 더 읽음
+                    await page.wait_for_timeout(5000)
+                    items = await read_board(page, href)
+                result[key] = items
             except Exception as e:
                 log.warning("'%s' 목록 조회 실패: %s", menu, e)
         await browser.close()
