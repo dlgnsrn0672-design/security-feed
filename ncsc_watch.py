@@ -87,27 +87,28 @@ async def fetch_boards():
         page = await browser.new_page(locale="ko-KR")
         result = {}
         for key, menu, *_ in BOARDS:
-            # 메뉴 주소(토큰)는 방금 연 메인 화면에서만 유효해서 게시판마다 메인부터 다시 들어감
-            try:
-                links = await main_links(page)
-            except Exception as e:
-                log.warning("NCSC 메인 접속 실패: %s", e)
-                break
-            href = next((h for t, h in links if t == menu and "PageLink" in h), None)
-            if key == "notice" and not href:
-                href = next((h for t, h in links if t == "더보기" and "PageLink" in h), None)
-            if not href:
-                log.warning("'%s' 메뉴를 찾지 못함 (사이트 구조 변경 가능성)", menu)
-                continue
-            try:
-                items = await read_board(page, href)
-                if not items:
-                    # 목록이 늦게 그려져 비어 보이는 경우가 있어 조금 더 기다렸다 한 번 더 읽음
-                    await page.wait_for_timeout(5000)
+            # 메뉴 주소(토큰)는 방금 연 메인 화면에서만 유효해서 게시판마다 메인부터 다시 들어감.
+            # 목록이 늦게 그려져 비어 보이면 메인부터 한 번 더 시도
+            for attempt in range(2):
+                try:
+                    links = await main_links(page)
+                except Exception as e:
+                    log.warning("NCSC 메인 접속 실패: %s", e)
+                    break
+                href = next((h for t, h in links if t == menu and "PageLink" in h), None)
+                if key == "notice" and not href:
+                    href = next((h for t, h in links if t == "더보기" and "PageLink" in h), None)
+                if not href:
+                    log.warning("'%s' 메뉴를 찾지 못함 (사이트 구조 변경 가능성)", menu)
+                    break
+                try:
                     items = await read_board(page, href)
-                result[key] = items
-            except Exception as e:
-                log.warning("'%s' 목록 조회 실패: %s", menu, e)
+                except Exception as e:
+                    log.warning("'%s' 목록 조회 실패: %s", menu, e)
+                    items = []
+                if items:
+                    result[key] = items
+                    break
         await browser.close()
     return result
 
