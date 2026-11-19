@@ -44,7 +44,13 @@ log = logging.getLogger("ncsc_watch")
 async def read_board(page, href):
     """게시판 목록 [{title, kind, date}] (최신순)"""
     await page.goto(BASE + href, wait_until="load", timeout=90000)
-    await page.wait_for_timeout(3000)
+    # 목록은 스크립트가 나중에 그려서, 날짜가 있는 줄이 보일 때까지 기다림 (게시판마다 속도가 다름)
+    try:
+        await page.wait_for_function(
+            "() => [...document.querySelectorAll('tr')].some(r => /20\\d\\d[.-]\\d\\d[.-]\\d\\d/.test(r.innerText))",
+            timeout=20000)
+    except Exception:
+        log.info("목록 표시 대기 시간 초과 (%s)", href[-12:])
     rows = await page.eval_on_selector_all("tr", """rows => rows.map(r => {
         const a = r.querySelector('a');
         return [r.innerText.replace(/\\s+/g, ' ').trim(), a ? a.innerText.replace(/\\s+/g, ' ').trim() : ''];
